@@ -211,17 +211,49 @@ const generateSatinStitches = (pathMm: Point[], config: ProcessingConfig, colorI
         const tangentSum = addPoints(v1, v2);
         const tangentLen = Math.sqrt(tangentSum.x * tangentSum.x + tangentSum.y * tangentSum.y);
 
+        // Smart Corner Detection
+        const dot = dotProduct(v1, v2);
+        const angle = Math.acos(Math.max(-1, Math.min(1, dot))); // Angle in radians
+        const angleDeg = angle * (180 / Math.PI);
+
+        // If angle is sharp (> 60 degrees turn), we treat it as a corner
+        // Note: dot product of 0 means 90 degrees. dot product of -1 means 180 degrees (U-turn).
+        // We care about the "turn" angle. 
+        // If v1 and v2 are same direction, dot=1, angle=0.
+        // If v1 and v2 are 90 deg, dot=0, angle=90.
+
         let miterVector: Point;
         let miterLength = halfWidth;
 
-        if (tangentLen < 0.001) {
+        if (angleDeg > 60 && tangentLen > 0.001) {
+            // Sharp Corner: Use Mitre Limit logic strictly or Cap
+            // For now, we implement a simple Mitre clamp to prevent "spikes"
+            const bisector = normalize(tangentSum);
+            miterVector = { x: -bisector.y, y: bisector.x };
+
+            // Calculate miter length based on angle
+            // miter = 1 / sin(angle/2)
+            const sinHalfAngle = Math.sin((Math.PI - angle) / 2);
+            if (sinHalfAngle > 0.1) {
+                miterLength = halfWidth / sinHalfAngle;
+            } else {
+                miterLength = halfWidth * 3.0; // Fallback
+            }
+
+            // Hard limit to avoid huge spikes
+            if (miterLength > halfWidth * 2.5) {
+                miterLength = halfWidth * 2.5;
+                // Ideally here we would split the corner (Mitre Join geometry), 
+                // but clamping is a good first step for "Smart Corners" to avoid artifacts.
+            }
+        } else if (tangentLen < 0.001) {
             miterVector = n1;
         } else {
             const bisector = normalize(tangentSum);
             miterVector = { x: -bisector.y, y: bisector.x };
-            const dot = dotProduct(miterVector, n1);
-            if (Math.abs(dot) > 0.1) {
-                miterLength = halfWidth / dot;
+            const dotN = dotProduct(miterVector, n1);
+            if (Math.abs(dotN) > 0.1) {
+                miterLength = halfWidth / dotN;
             }
         }
 
@@ -242,9 +274,9 @@ const generateSatinStitches = (pathMm: Point[], config: ProcessingConfig, colorI
             const dLeft = dist(p1, prevP1);
             const dRight = dist(p2, prevP2);
 
-            const SHORTENING_RATIO = 0.6;
-            const CRITICAL_DENSITY = 0.4;
-            const SHORTEN_AMOUNT = 0.3;
+            const SHORTENING_RATIO = 0.7; // Increased from 0.6 to trigger earlier
+            const CRITICAL_DENSITY = 0.5; // Increased from 0.4 to trigger earlier
+            const SHORTEN_AMOUNT = 0.33; // Shorten by 1/3
 
             if (i % 2 !== 0) {
                 if (dLeft < dRight * SHORTENING_RATIO && dLeft < CRITICAL_DENSITY) {
@@ -437,23 +469,42 @@ const generateUnderlay = (pathMm: Point[], config: ProcessingConfig, colorIdx: n
     if (config.stitchType === 'satin') {
         const width = config.satinColumnWidthMm;
 
+        // 1. Narrow Columns (< 2mm): Center Run
         if (width < 2.0) {
             stitches = generateRunningStitches(pathMm, config, colorIdx, hexColor);
-        } else {
-            const inset = (width / 2) - 0.4;
-            if (inset > 0) {
-                stitches = generateSatinStitches(pathMm, { ...config, satinColumnWidthMm: inset * 2, densityMm: 2.0, pullCompensationMm: 0 }, colorIdx, hexColor);
+        }
+        // 2. Medium Columns (2mm - 5mm): Edge Run (Contour)
+        else if (width >= 2.0 && width < 5.0) {
+            const inset = 0.4; // 0.4mm inset from edge
+            const insetPoly = offsetPolygon(pathMm, -inset);
+            if (insetPoly.length > 2) {
+                stitches = generateRunningStitches(insetPoly, config, colorIdx, hexColor);
+                // Ensure closed loop
+                if (stitches.length > 0) {
+                    stitches.push({ ...stitches[0], type: 'stitch', colorIndex: colorIdx, hexColor });
+                }
             }
         }
+        // 3. Wide Columns (> 5mm): Zigzag / Double Zigzag
+        else {
+            // For now, we implement a simple Zigzag Underlay
+            // We reuse Satin logic but with low density and no pull comp
+            const inset = 0.6;
+            const zigzagConfig = {
+                ...config,
+                satinColumnWidthMm: width - (inset * 2),
+                densityMm: 2.5, // Low density for underlay
+                pullCompensationMm: 0
+            };
+            stitches = generateSatinStitches(pathMm, zigzagConfig, colorIdx, hexColor);
+        }
     } else {
+        // Tatami Underlay: Usually an Edge Run + loose Tatami in opposite angle
+        // For simplicity in this phase: Edge Run
         const insetPoly = offsetPolygon(pathMm, -0.6);
         if (insetPoly.length > 2) {
             const run = generateRunningStitches(insetPoly, config, colorIdx, hexColor);
-            // Note: generateRunningStitches returns standard stitches.
-            // We need to mark them as structure.
             stitches = run.map(s => ({ ...s, isStructure: true }));
-
-            // Ensure closed loop if it was closed
             if (run.length > 0) {
                 stitches.push({ ...run[0], type: 'stitch', isStructure: true });
             }
