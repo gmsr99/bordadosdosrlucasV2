@@ -33,10 +33,11 @@ export async function POST(req: NextRequest) {
     
     CRITICAL RULES:
     1. OUTPUT FORMAT: Return a CLEAN, FLAT PNG image. Do NOT generate SVG code.
-    2. PALETTE: Reduce the image to EXACTLY ${colorCount || 4} high-contrast colors + White background.
-    3. NO GRADIENTS: Flatten all gradients to solid blocks. Embroidery cannot do gradients.
-    4. NO ANTI-ALIASING: Edges must be sharp (aliased) for perfect vector tracing.
-    5. SIMPLIFY: Remove small "confetti" noise pixels.
+    2. BACKGROUND: REMOVE THE BACKGROUND COMPLETELY. The subject must be on a PURE WHITE background.
+    3. PALETTE: Reduce the SUBJECT colors to EXACTLY ${colorCount || 4} high-contrast colors. Do not count the white background as a color.
+    4. NO GRADIENTS: Flatten all gradients to solid blocks. Embroidery cannot do gradients.
+    5. NO ANTI-ALIASING: Edges must be sharp (aliased) for perfect vector tracing.
+    6. SIMPLIFY: Remove small "confetti" noise pixels.
     
     STYLE SPECIFIC:`;
 
@@ -73,7 +74,7 @@ export async function POST(req: NextRequest) {
         const candidates = response.candidates;
         if (candidates && candidates.length > 0) {
             for (const part of candidates[0].content.parts) {
-                if (part.inlineData && part.inlineData.data) {
+                if (part.inlineData?.data) {
                     const resultImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
                     return NextResponse.json({ resultImage });
                 }

@@ -62,6 +62,7 @@ const App: React.FC = () => {
             setStitchType('tatami');
             setColorCount(4);
             setPullComp(0.3);
+            setDensity(0.38); // Tighter density for solid look
             setStitchLength(7.0); // Tatami default split
         }
     };
@@ -141,7 +142,7 @@ const App: React.FC = () => {
             const config: ProcessingConfig = {
                 designStyle, widthMm: targetWidth, stitchType, densityMm: density, satinColumnWidthMm: satinWidth,
                 pullCompensationMm: pullComp, enableUnderlay, tatamiAngle, colorCount, maxStitchLengthMm: stitchLength,
-                minStitchLengthMm: designStyle === 'vintage' ? 0.1 : 0.3, trimJumpDistanceMm: trimJump
+                minStitchLengthMm: designStyle === 'vintage' ? 0.1 : 0.2, trimJumpDistanceMm: trimJump
             };
 
             // Slight delay to allow UI to show loading state

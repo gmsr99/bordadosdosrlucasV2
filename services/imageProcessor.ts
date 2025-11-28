@@ -370,7 +370,7 @@ const generateTatamiStitches = (shapePathsMm: Point[][], config: ProcessingConfi
             const xEnd = intersections[i + 1];
             const segmentLen = xEnd - xStart;
 
-            if (segmentLen < 0.5) continue;
+            if (segmentLen < 0.1) continue;
 
             const lineStitches: Point[] = [];
 
@@ -378,12 +378,11 @@ const generateTatamiStitches = (shapePathsMm: Point[][], config: ProcessingConfi
                 lineStitches.push({ x: xStart, y: y });
                 lineStitches.push({ x: xEnd, y: y });
             } else {
-                // Tatami Randomness (Anti-Railroading)
-                // We use a deterministic "random" based on Y to allow re-runs to be consistent
-                const pseudoRandom = Math.sin(y * 123.45) * 10000;
-                const noise = (pseudoRandom - Math.floor(pseudoRandom)) * 0.4; // 0.0 to 0.4 variance
-
-                const offsetFraction = ((Math.abs(Math.round(y * 10)) % 3) / 3.0) + noise;
+                // Standard Tatami Pattern (Brick)
+                // Offset 0, 0.5, 0, 0.5 to create a clean brick look
+                // Or 0, 0.33, 0.66 for a twill look. Let's stick to 0.5 (brick) for stability.
+                const rowIdx = Math.round(y / rowSpacing);
+                const offsetFraction = (rowIdx % 2 === 0) ? 0 : 0.5;
                 const rowOffset = offsetFraction * stitchLen;
 
                 let currX = xStart + ((stitchLen - rowOffset) % stitchLen);
@@ -404,7 +403,9 @@ const generateTatamiStitches = (shapePathsMm: Point[][], config: ProcessingConfi
             if (stitches.length > 0) {
                 const lastStitch = stitches[stitches.length - 1];
                 const d = dist(lastStitch, firstP);
-                if (d > 2.0) {
+                // Increase jump threshold inside Tatami to avoid trims in the middle of a shape
+                // Only jump if it's a huge distance (e.g. > 7mm), otherwise travel run
+                if (d > 7.0) {
                     stitches.push({ ...firstP, type: 'jump', colorIndex: colorIdx, hexColor, isStructure: true });
                 } else if (d > 0.1) {
                     stitches.push({ ...firstP, type: 'stitch', colorIndex: colorIdx, hexColor });
@@ -498,7 +499,10 @@ const generateUnderlay = (pathMm: Point[], config: ProcessingConfig, colorIdx: n
             };
             stitches = generateSatinStitches(pathMm, zigzagConfig, colorIdx, hexColor);
         }
-    } else {
+    } else if (config.stitchType === 'running') {
+        // Running stitch underlay is not typically needed or is the main stitch itself
+        return [];
+    } else if (config.stitchType === 'tatami') {
         // Tatami Underlay: Usually an Edge Run + loose Tatami in opposite angle
         // For simplicity in this phase: Edge Run
         const insetPoly = offsetPolygon(pathMm, -0.6);
