@@ -25,38 +25,75 @@ export async function POST(req: NextRequest) {
         const ai = new GoogleGenAI({ apiKey });
         const cleanBase64 = base64Image.replace(/^data:image\/(png|jpeg|jpg|webp);base64,/, '');
 
-        // --- VISION PROMPT STRATEGY (Reused from original service) ---
-        let systemPrompt = `You are an expert textile digitizer preparing an image for an industrial embroidery machine.
-    
-    TASK:
-    Analyze the input image and generate a "Pre-Production Bitmap" optimized for auto-vectorization.
-    
-    CRITICAL RULES:
-    1. OUTPUT FORMAT: Return a CLEAN, FLAT PNG image. Do NOT generate SVG code.
-    2. BACKGROUND: REMOVE THE BACKGROUND COMPLETELY. The subject must be on a PURE WHITE background.
-    3. PALETTE: Reduce the SUBJECT colors to EXACTLY ${colorCount || 4} high-contrast colors. Do not count the white background as a color.
-    4. NO GRADIENTS: Flatten all gradients to solid blocks. Embroidery cannot do gradients.
-    5. NO ANTI-ALIASING: Edges must be sharp (aliased) for perfect vector tracing.
-    6. SIMPLIFY: Remove small "confetti" noise pixels.
-    
-    STYLE SPECIFIC:`;
+        // --- VISION PROMPT STRATEGY (Updated) ---
+        let systemPrompt = `
+ROLE:
+You are an image pre-processing engine in an embroidery auto-vectorization pipeline.
+Your job is to transform the input image into a clean "Pre-Production Bitmap" that will later be auto-traced into SVG and converted to stitches.
+
+TASK:
+Analyze the input image and generate a bitmap that is optimized for automatic vector tracing and embroidery.
+
+STRICT OUTPUT RULES:
+1. OUTPUT FORMAT:
+   - Return only a raster image as a CLEAN, FLAT PNG.
+   - Do NOT generate SVG code.
+   - Do NOT include any text, captions or explanations in the response, only the image.
+
+2. BACKGROUND:
+   - REMOVE THE BACKGROUND COMPLETELY.
+   - Replace it with a PURE WHITE background (#FFFFFF).
+   - No shadows, no gradients, no textures, no vignettes.
+
+3. SUBJECT AND COMPOSITION:
+   - Keep the main subject fully visible and not cropped.
+   - Preserve the original pose and proportions of the subject.
+   - Do NOT add new objects, logos, text or decorations that were not in the original image.
+
+4. GRADIENTS AND SHADING:
+   - NO GRADIENTS.
+   - Flatten all gradients and soft shading into solid color regions.
+   - Do NOT simulate gradients using dithering, noise or halftone patterns.
+
+5. EDGES AND ANTI-ALIASING:
+   - NO ANTI-ALIASING on the SUBJECT edges.
+   - Edges must be sharp, crisp and aliased, with no soft blur and no semi-transparent pixels on the borders.
+   - Avoid glow, feathering, motion blur or soft eraser effects.
+
+6. CLEANUP AND SIMPLIFICATION:
+   - Remove small "confetti" noise pixels and tiny isolated spots.
+   - Simplify details that are too fine for embroidery, while keeping the main shapes and recognisable features.
+
+7. SIZE AND ASPECT RATIO:
+   - Keep the same aspect ratio as the original image.
+   - Use a resolution high enough for clean vector tracing (at least 1024 pixels on the longest side, if possible).
+
+STYLE SPECIFIC:
+`;
 
         if (designStyle === 'vintage') {
             systemPrompt += `
-      - STYLE: Redwork / Skeleton Line Art.
-      - CONTENT: Black lines on White background.
-      - THICKNESS: Consistent line width.
-      - ISOLATE: Remove background entirely.`;
+STYLE: "Vintage" Redwork / Skeleton Line Art
+- CONTENT: Black lines on a pure White background.
+- LINES: Consistent line width, clean and continuous.
+- SHAPES: Use outlines only, no filled areas.
+- SIMPLIFY: Emphasize key contours and important interior lines. Avoid dense hatching or shading.`;
         } else if (designStyle === 'patch_line') {
             systemPrompt += `
-      - STYLE: Bold Patch Outline.
-      - CONTENT: Thick Black shapes on White background.
-      - INTENT: These black shapes will be filled with Tatami stitch, so make them chunky.`;
+STYLE: Bold Patch Outline
+- CONTENT: Thick black shapes on a pure White background.
+- SHAPES: The black shapes define the filled patch areas.
+- INTENT: These black areas will be filled with Tatami stitch, so make them chunky and well separated.
+- AVOID: Tiny holes, very thin gaps or micro-details inside shapes.`;
         } else {
             systemPrompt += `
-      - STYLE: Posterized / Patch Fill.
-      - CONTENT: Solid color regions separated by clear boundaries.
-      - INTENT: Multi-color Tatami fill.`;
+STYLE: "Poster Art" / Vector Illustration
+- CONTENT: High-contrast, flat vector art style.
+- PALETTE: Reduce the SUBJECT colors to EXACTLY ${colorCount || 4} solid, high-contrast colors. Do NOT count the white background as a color. Avoid near-duplicate shades.
+- SIMPLIFICATION: Aggressively simplify complex details into bold, solid color shapes.
+- LOOK: Like a screen print or a vintage travel poster.
+- INTENT: Multi-color Tatami fill. Each color region must be large enough to be embroidered.
+- AVOID: Realism, photographic shading, textures, or small isolated pixels.`;
         }
 
         console.log(`[API] Sending to Gemini Vision... Style: ${designStyle}`);
@@ -72,8 +109,9 @@ export async function POST(req: NextRequest) {
         });
 
         const candidates = response.candidates;
-        if (candidates && candidates.length > 0) {
-            for (const part of candidates[0].content.parts) {
+        const parts = candidates?.[0]?.content?.parts;
+        if (parts) {
+            for (const part of parts) {
                 if (part.inlineData?.data) {
                     const resultImage = `data:${part.inlineData.mimeType || 'image/png'};base64,${part.inlineData.data}`;
                     return NextResponse.json({ resultImage });

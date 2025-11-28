@@ -1,6 +1,7 @@
 
 import { Point, Stitch, StitchType, ProcessingConfig, DesignStyle, VectorLayer } from '../types';
 import { Potrace } from './potrace';
+import { processVTracer } from './vtracerService';
 
 // --- Constants from PDF ---
 const PROCESS_WIDTH = 1024;
@@ -29,6 +30,10 @@ const distSq = (p1: Point, p2: Point) => Math.pow(p1.x - p2.x, 2) + Math.pow(p1.
 const rotatePoint = (p: Point, angleRad: number): Point => {
     return { x: p.x * Math.cos(angleRad) - p.y * Math.sin(angleRad), y: p.x * Math.sin(angleRad) + p.y * Math.cos(angleRad) };
 };
+
+// ... (rest of helper functions) ...
+
+
 
 const interpolatePoints = (p1: Point, p2: Point, t: number): Point => ({
     x: p1.x + (p2.x - p1.x) * t,
@@ -742,58 +747,13 @@ const processVintageVector = (ctx: CanvasRenderingContext2D, width: number, heig
     };
 };
 
-// Dedicated Patch Processor: Color segmentation based
-const processPatchVectors = (ctx: CanvasRenderingContext2D, width: number, height: number, config: ProcessingConfig, img: HTMLImageElement): { layers: VectorLayer[], svgPaths: string, colors: string[] } => {
-    let targetColors = [{ r: 0, g: 0, b: 0, hex: '#000000' }];
-    if (config.colorCount > 1) {
-        targetColors = extractDominantColors(ctx, width, height, config.colorCount);
-    }
-    targetColors.sort((a, b) => getLuminance(b.hex) - getLuminance(a.hex));
+// Dedicated Patch Processor: VTracer based
+const processPatchVectors = async (ctx: CanvasRenderingContext2D, width: number, height: number, config: ProcessingConfig): Promise<{ layers: VectorLayer[], svgPaths: string, colors: string[] }> => {
+    const imageData = ctx.getImageData(0, 0, width, height);
 
-    const finalLayers: VectorLayer[] = [];
-    const pixelsPerMm = PROCESS_WIDTH / config.widthMm;
-    const cx = width / 2; const cy = height / 2;
-    let svgPaths = '';
-
-    for (const color of targetColors) {
-        const binaryGrid = new Int8Array(width * height);
-        const data = ctx.getImageData(0, 0, width, height).data;
-
-        for (let k = 0; k < binaryGrid.length; k++) {
-            const r = data[k * 4], g = data[k * 4 + 1], b = data[k * 4 + 2];
-            if (colorDist(r, g, b, color.r, color.g, color.b) < 60 && data[k * 4 + 3] > 128) {
-                binaryGrid[k] = 1;
-            }
-        }
-
-        // Morphology for patches to close gaps
-        let cleanGrid = morphologyOpen(binaryGrid, width, height, 1);
-
-        const contours = traceBitmapWithPotrace(cleanGrid, width, height);
-
-        let pathsMm = contours.map(path => path.map(p => ({ x: (p.x - cx) / pixelsPerMm, y: (cy - p.y) / pixelsPerMm })));
-        const epsilon = 0.05;
-        pathsMm = pathsMm.map(path => simplifyPath(path, epsilon));
-        pathsMm = optimizePathSequence(pathsMm);
-
-        if (pathsMm.length > 0) {
-            finalLayers.push({ color: color.hex, paths: pathsMm });
-
-            const pathD = pathsMm.map(path => {
-                const pixels = path.map(p => ({ x: (p.x * pixelsPerMm) + cx, y: (-p.y * pixelsPerMm) + cy }));
-                if (pixels.length < 2) return '';
-                return `M ${pixels[0].x.toFixed(1)} ${pixels[0].y.toFixed(1)} ` + pixels.slice(1).map(p => `L ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(' ') + ' Z';
-            }).join(' ');
-
-            svgPaths += `<path d="${pathD}" fill="${color.hex}" stroke="none" />`;
-        }
-    }
-
-    return {
-        layers: finalLayers,
-        svgPaths,
-        colors: targetColors.map(c => c.hex)
-    };
+    // Call VTracer Service
+    // Note: VTracer handles color quantization internally based on options
+    return await processVTracer(imageData, config.widthMm, config.colorCount);
 };
 
 // PHASE 2: PREPARE VECTOR LAYERS (Router)
@@ -812,12 +772,38 @@ export const prepareVectorLayers = async (imageSrc: string, config: ProcessingCo
     let svgPaths = '';
     let finalColors: string[] = ['#000000'];
 
-    if (config.designStyle === 'vintage') {
+    // Check if input is SVG (data URL or file extension)
+    const isSvg = imageSrc.startsWith('data:image/svg+xml') || imageSrc.endsWith('.svg');
+
+    if (isSvg) {
+        // Direct SVG Input: Bypass AI and Vectorization
+        let svgContent = '';
+        if (imageSrc.startsWith('data:image/svg+xml')) {
+            // Decode base64 or URL encoded SVG
+            const base64Data = imageSrc.split(',')[1];
+            svgContent = decodeURIComponent(escape(atob(base64Data)));
+        } else {
+            // Fetch if it's a URL (not implemented for local files yet, assuming data URL from App.tsx)
+            // For now, App.tsx should provide data URL
+            const response = await fetch(imageSrc);
+            svgContent = await response.text();
+        }
+
+        // Use the extracted parser
+        const { parseSvgToLayers } = await import('./vtracerService');
+        const result = parseSvgToLayers(svgContent, img.width, img.height, config.widthMm);
+
+        resultLayers = result.layers;
+        svgPaths = result.svgPaths;
+        finalColors = result.colors;
+
+    } else if (config.designStyle === 'vintage') {
         const result = processVintageVector(ctx, canvas.width, canvas.height, config);
         resultLayers = result.layers;
         svgPaths = result.svgPaths;
     } else {
-        const result = processPatchVectors(ctx, canvas.width, canvas.height, config, img);
+        // Use VTracer for Patch Fill
+        const result = await processPatchVectors(ctx, canvas.width, canvas.height, config);
         resultLayers = result.layers;
         svgPaths = result.svgPaths;
         finalColors = result.colors;

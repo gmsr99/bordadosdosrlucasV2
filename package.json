@@ -4,17 +4,21 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "next dev",
+    "dev": "next dev --webpack",
     "build": "next build",
     "start": "next start",
     "lint": "next lint"
   },
   "dependencies": {
     "@google/genai": "^1.30.0",
+    "@neplex/vectorizer": "^0.0.5",
+    "@neplex/vectorizer-darwin-arm64": "^0.0.5",
     "lucide-react": "^0.554.0",
     "next": "^16.0.5",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "svg-path-parser": "^1.1.0",
+    "vectortracer": "^0.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.14.0",

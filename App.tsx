@@ -103,6 +103,16 @@ const App: React.FC = () => {
         try {
             setState(AppState.ANALYZING);
             setErrorMsg(null);
+
+            // Check if it's an SVG
+            if (originalImage.startsWith('data:image/svg+xml') || originalImage.endsWith('.svg')) {
+                // BYPASS AI: Use SVG directly
+                console.log("SVG detected, bypassing AI...");
+                setProcessedImage(originalImage);
+                setState(AppState.REVIEW_BITMAP);
+                return;
+            }
+
             const aiBitmap = await simplifyImageWithAI(originalImage, "", colorCount, designStyle);
             setProcessedImage(aiBitmap);
             setState(AppState.REVIEW_BITMAP);
@@ -228,7 +238,7 @@ const App: React.FC = () => {
                             <p className="text-sm text-neutral-500 max-w-xs mx-auto">Carregue uma imagem para iniciar o pipeline de engenharia de bordado.</p>
                             <label className="inline-flex items-center gap-2 bg-[#1C1C1C] text-white px-6 py-3 rounded-xl font-medium cursor-pointer shadow-lg hover:bg-[#333] transition-colors">
                                 <Upload size={18} /> Carregar Imagem
-                                <input type="file" onChange={handleFileUpload} className="hidden" accept="image/*" />
+                                <input type="file" accept="image/png, image/jpeg, image/svg+xml" onChange={handleFileUpload} className="hidden" id="file-upload" />
                             </label>
                         </div>
                     )}
