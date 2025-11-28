@@ -1,0 +1,5 @@
+{
+  "name": "Embroidery",
+  "description": "AI-powered embroidery digitizer. Convert photos to Bernina .EXP embroidery files.",
+  "requestFramePermissions": []
+}
